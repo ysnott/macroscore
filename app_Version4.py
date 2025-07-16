@@ -19,11 +19,11 @@ INDICATORS = {
 }
 
 FOREX_PAIRS = [
-    "EUR/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CAD", "GBP/USD", "USD/CHF", "EUR/GBP"
-]  # limit to 8 pairs for free tier
+    "USD/JPY", "EUR/USD", "GBP/USD", "AUD/USD", "USD/CAD", "USD/CHF", "NZD/USD", "EUR/GBP"
+]  # only 8 pairs for free tier safety
 
 # --- Functions ---
-def get_fred_data(series_id):
+def get_fred_observations(series_id):
     params = {
         "series_id": series_id,
         "api_key": FRED_API_KEY,
@@ -34,51 +34,38 @@ def get_fred_data(series_id):
         response = requests.get(FRED_BASE_URL, params=params)
         response.raise_for_status()
         data = response.json()
-        observations = [obs for obs in data.get("observations", []) if obs.get("value") not in (".", "")]
-        return observations
+        return [obs for obs in data.get("observations", []) if obs.get("value") not in (".", "")]
     except Exception as e:
-        st.error(f"Error fetching data for {series_id}: {e}")
+        st.warning(f"Error fetching FRED data for {series_id}: {e}")
         return []
 
 def calculate_cpi_yoy(observations):
-    # Find latest and value from same month last year
     if len(observations) < 13:
         return None
     latest = float(observations[-1]["value"])
     latest_date = observations[-1]["date"]
-    # Find previous year same month
+    prev_year = str(int(latest_date[:4]) - 1)
+    prev_month = latest_date[5:7]
     for obs in reversed(observations):
-        if obs["date"][:4] == str(int(latest_date[:4]) - 1) and obs["date"][5:7] == latest_date[5:7]:
+        if obs["date"].startswith(f"{prev_year}-{prev_month}"):
             prev = float(obs["value"])
-            break
-    else:
-        return None
-    return ((latest - prev) / prev) * 100
+            return ((latest - prev) / prev) * 100
+    return None
 
-def fetch_forex_rate(pair):
-    url = f"{TWELVE_DATA_BASE_URL}?symbol={pair}&interval=1min&apikey={TWELVE_DATA_API_KEY}"
+def fetch_twelvedata_price(symbol):
+    url = f"{TWELVE_DATA_BASE_URL}?symbol={symbol}&interval=1min&apikey={TWELVE_DATA_API_KEY}"
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
-        if "values" in data:
+        if "values" in data and len(data["values"]) > 0:
             return float(data["values"][0]["close"])
+        msg = data.get("message")
+        if msg:
+            st.warning(f"Error fetching {symbol}: {msg}")
         return None
     except Exception as e:
-        st.warning(f"Error fetching Forex rate for {pair}: {e}")
-        return None
-
-def fetch_dxy_price():
-    url = f"{TWELVE_DATA_BASE_URL}?symbol=DXY&interval=1min&apikey={TWELVE_DATA_API_KEY}"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        if "values" in data:
-            return float(data["values"][0]["close"])
-        return None
-    except Exception as e:
-        st.warning(f"Error fetching DXY price: {e}")
+        st.warning(f"Error fetching {symbol}: {e}")
         return None
 
 def score_market(inflation, unemployment, interest_rate, gdp):
@@ -104,17 +91,17 @@ st.title("📊 MacroScore Real-Time Dashboard with Forex Pairs")
 st.markdown("Real-time macroeconomic indicators from FRED + live Forex rates + live DXY from Twelve Data")
 
 with st.spinner("Fetching macroeconomic data..."):
-    cpi_obs = get_fred_data(INDICATORS["Inflation Rate (YoY %)"])
+    cpi_obs = get_fred_observations(INDICATORS["Inflation Rate (YoY %)"])
     inflation = calculate_cpi_yoy(cpi_obs)
-    unemployment_obs = get_fred_data(INDICATORS["Unemployment Rate"])
+    unemployment_obs = get_fred_observations(INDICATORS["Unemployment Rate"])
     unemployment = float(unemployment_obs[-1]["value"]) if unemployment_obs else None
-    interest_obs = get_fred_data(INDICATORS["Federal Funds Rate"])
+    interest_obs = get_fred_observations(INDICATORS["Federal Funds Rate"])
     interest_rate = float(interest_obs[-1]["value"]) if interest_obs else None
-    gdp_obs = get_fred_data(INDICATORS["GDP Growth Rate"])
+    gdp_obs = get_fred_observations(INDICATORS["GDP Growth Rate"])
     gdp = float(gdp_obs[-1]["value"]) if gdp_obs else None
 
 with st.spinner("Fetching DXY price..."):
-    dxy_price = fetch_dxy_price()
+    dxy_price = fetch_twelvedata_price("DXY")
 
 st.subheader("📈 Latest Macroeconomic Indicators")
 cols = st.columns(5)
@@ -139,13 +126,14 @@ st.markdown(f"### {sentiment_color} **{sentiment}**")
 with st.spinner("Fetching live Forex rates..."):
     forex_rates = {}
     for pair in FOREX_PAIRS:
-        rate = fetch_forex_rate(pair)
+        rate = fetch_twelvedata_price(pair)
         forex_rates[pair] = rate
-        time.sleep(8)  # Wait to avoid hitting the rate limit (8 requests/minute)
+        time.sleep(8)  # 8 seconds per request for free tier safety
 
 st.subheader("💱 Forex Pairs Rates")
-for pair, rate in forex_rates.items():
-    st.write(f"**{pair}**: {rate:.5f}" if rate else "N/A")
+for pair in FOREX_PAIRS:
+    rate = forex_rates.get(pair)
+    st.write(f"**{pair}**: {rate:.5f}" if rate is not None else f"**{pair}**: N/A")
 
 st.caption(f"Last updated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 st.caption("👨‍💻 Created by YSNOTT")
