@@ -3,7 +3,7 @@ import requests
 import datetime
 
 # ✅ Replace with your real FRED API key
-API_KEY = "your_real_api_key_here"
+API_KEY = "ed0f91db6215dd68eaa4aabaa84e3b9c"
 BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 
 # ✅ Function to fetch data from FRED
