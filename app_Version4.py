@@ -27,27 +27,50 @@ FOREX_PAIRS = [
 
 # --- Functions ---
 
-def get_fred_data(series_id, start_date="2022-01-01"):
+def get_fred_cpi_yoy(series_id):
     params = {
         "series_id": series_id,
         "api_key": FRED_API_KEY,
         "file_type": "json",
-        "observation_start": start_date
+        "limit": 500,
     }
     try:
         response = requests.get(FRED_BASE_URL, params=params)
         response.raise_for_status()
         data = response.json()
         observations = data.get("observations", [])
-        # Find the last valid numeric value (skip '.' or missing)
-        for obs in reversed(observations):
-            value = obs.get("value")
-            if value not in (".", ""):
-                return float(value)
-        return None
+
+        # فلترة القيم الصالحة فقط (تجاهل ".")
+        valid_obs = [obs for obs in observations if obs.get("value") not in (".", "")]
+        
+        if len(valid_obs) < 13:
+            return None  # مش كاف بيانات لحساب YoY
+        
+        # نأخذ آخر قيمة (آخر شهر)
+        latest = valid_obs[-1]
+        latest_date = latest["date"]
+        latest_value = float(latest["value"])
+
+        # نبحث عن قيمة نفس الشهر قبل سنة كاملة
+        target_year = int(latest_date[:4]) - 1
+        target_month = latest_date[5:7]
+
+        prev_year_value = None
+        for obs in valid_obs:
+            if obs["date"].startswith(f"{target_year}-{target_month}"):
+                prev_year_value = float(obs["value"])
+                break
+        
+        if prev_year_value is None:
+            return None
+        
+        # نحسب نسبة التغير YoY
+        yoy = ((latest_value - prev_year_value) / prev_year_value) * 100
+        return yoy
     except Exception as e:
-        st.error(f"Error fetching data for {series_id}: {e}")
+        st.error(f"Error fetching CPI YoY data: {e}")
         return None
+
 
 def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
     score = 0
