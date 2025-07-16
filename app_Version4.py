@@ -1,143 +1,57 @@
 import streamlit as st
-import requests
-import datetime
-import os
-import requests
-
-API_KEY = "59f6d8060a75195604f3f77f0f82f29d"
-BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
-
-def fetch_fred_latest(series_id):
-    url = f"{BASE_URL}?series_id={series_id}&api_key={API_KEY}&file_type=json"
-    r = requests.get(url)
-    data = r.json()
-    try:
-        obs = data["observations"]
-        # Find last non-empty value
-        for ob in reversed(obs):
-            val = ob["value"]
-            if val not in ('', None, '.'):
-                return float(val)
-        return None
-    except Exception:
-        return None
-
-# Example usage:
-cpi = fetch_fred_latest("CPIAUCSL")
-unemployment = fetch_fred_latest("UNRATE")
-interest_rate = fetch_fred_latest("FEDFUNDS")
-gdp_growth = fetch_fred_latest("A191RL1Q225SBEA")
-
-print("CPI:", cpi)
-print("Unemployment Rate:", unemployment)
-print("Interest Rate:", interest_rate)
-print("GDP Growth Rate:", gdp_growth)
-# ====== CONFIG ======
-API_KEY = os.getenv("TWELVE_DATA_API_KEY", "fd361e714c704855964af24234085bc6")
-BASE_URL = "https://api.twelvedata.com"
-FOREX_PAIRS = [
-    "EUR/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CAD", "GBP/USD", "USD/CHF", "EUR/GBP"
-]
-SIGNAL_WINDOW = 10  # minutes for momentum signal
-
-# ====== DATA FETCHING ======
-def fetch_price_history(pair, window=SIGNAL_WINDOW):
-    url = f"{BASE_URL}/time_series?symbol={pair}&interval=1min&apikey={API_KEY}&outputsize={window}"
-    try:
-        r = requests.get(url)
-        r.raise_for_status()
-        data = r.json()
-        if "values" in data and len(data["values"]) >= 2:
-            latest = float(data["values"][0]["close"])
-            oldest = float(data["values"][-1]["close"])
-            change = latest - oldest
-            return latest, oldest, change
-        elif "values" in data and len(data["values"]) == 1:
-            return float(data["values"][0]["close"]), None, None
-        return None, None, None
+                    base_curr_rate = data['rates'].get(base_curr)
+                    quote_curr_rate = data['rates'].get(quote_curr)
+                    if base_curr_rate and quote_curr_rate:
+                        rate = (1 / base_curr_rate) * quote_curr_rate
+                    else:
+                        rate = None
+                rates[pair] = round(rate, 5) if rate else None
+            except:
+                rates[pair] = None
+        return rates
     except Exception as e:
-        return None, None, None
+        st.error(f"Error fetching Forex data: {e}")
+        return {pair: None for pair in pairs}
 
-def fetch_dxy():
-    url = f"{BASE_URL}/time_series?symbol=DXY&interval=1min&apikey={API_KEY}&outputsize=1"
-    try:
-        r = requests.get(url)
-        r.raise_for_status()
-        data = r.json()
-        if "values" in data and len(data["values"]) >= 1:
-            return float(data["values"][0]["close"])
-        return None
-    except Exception:
-        return None
-
-# ====== SIGNALS & ANALYSIS ======
-def get_signal(latest, oldest):
-    if latest is None or oldest is None:
-        return "❓ N/A"
-    if abs(latest - oldest) < 0.00005:
-        return "⚪ Neutral"
-    if latest > oldest:
-        return "🟢 Bullish"
-    else:
-        return "🔴 Bearish"
-
-def get_macro_placeholder():
-    # Placeholder for macro data, ready for future API integration
-    return {
-        "Inflation Rate (YoY %)": None,
-        "Unemployment Rate": None,
-        "Interest Rate": None,
-        "GDP Growth Rate": None
-    }
-
-# ====== STREAMLIT UI ======
-st.set_page_config(page_title="MacroScore Dashboard", layout="wide")
+# --- Streamlit UI ---
+st.set_page_config(page_title="MacroScore Dashboard with Forex", layout="wide")
 st.title("📊 MacroScore Real-Time Dashboard with Forex Pairs")
-st.markdown("**All data live from Twelve Data API**")
+st.markdown("Dashboard يحلل المؤشرات الاقتصادية من FRED ويربطها بأسعار الفوركس (Forex) الحية من exchangerate.host")
 
-# --- MACRO SECTION (placeholder, can be replaced with real API integration) ---
+with st.spinner("Fetching macroeconomic data..."):
+    inflation = get_fred_data(INDICATORS["Inflation Rate (CPI YoY %)"])
+    unemployment = get_fred_data(INDICATORS["Unemployment Rate"])
+    interest_rate = get_fred_data(INDICATORS["Federal Funds Rate"])
+    gdp = get_fred_data(INDICATORS["GDP Growth Rate"])
+    dollar_index = get_fred_data(INDICATORS["USD Index"])
+
 st.subheader("📈 Latest Macroeconomic Indicators")
-macro = get_macro_placeholder()
 cols = st.columns(5)
-for i, key in enumerate(list(macro.keys()) + ["USD Index (DXY)"]):
-    if key == "USD Index (DXY)":
-        with st.spinner("Fetching DXY..."):
-            dxy_price = fetch_dxy()
-        val = f"{dxy_price:.2f}" if dxy_price is not None else "N/A"
-        cols[i].metric(key, val)
-    else:
-        cols[i].metric(key, "N/A")
-if all(v is None for v in macro.values()):
-    st.info("Twelve Data does not provide macroeconomic indicators. For macro data, consider integrating FRED or Trading Economics API.")
+cols[0].metric("Inflation Rate (CPI YoY %)", f"{inflation:.2f}%" if inflation is not None else "N/A")
+cols[1].metric("Unemployment Rate", f"{unemployment:.2f}%" if unemployment is not None else "N/A")
+cols[2].metric("Interest Rate", f"{interest_rate:.2f}%" if interest_rate is not None else "N/A")
+cols[3].metric("GDP Growth Rate", f"{gdp:.2f}%" if gdp is not None else "N/A")
+cols[4].metric("USD Index", f"{dollar_index:.2f}" if dollar_index is not None else "N/A")
 
-# --- MARKET SENTIMENT (placeholder, can be dynamic if macro is integrated) ---
+sentiment = score_market(inflation, unemployment, interest_rate, gdp, dollar_index)
+sentiment_color = {
+    "Strong Bullish": "🟢",
+    "Bullish": "🟩",
+    "Neutral": "⚪",
+    "Bearish": "🔻",
+    "Strong Bearish": "🔴"
+}.get(sentiment, "❓")
+
 st.subheader("📉 Market Sentiment Based on Macro Score")
-st.markdown("### 🔴 **Strong Bearish** (Macro signals not available)")
+st.markdown(f"### {sentiment_color} **{sentiment}**")
 
-# --- FOREX TABLE WITH SIGNALS ---
-st.subheader("💱 Forex Pairs Rates & Signals")
-with st.spinner("Fetching live Forex rates and signals..."):
-    forex_rows = []
-    for pair in FOREX_PAIRS:
-        latest, oldest, change = fetch_price_history(pair)
-        signal = get_signal(latest, oldest)
-        rate_str = f"{latest:.5f}" if latest is not None else "N/A"
-        forex_rows.append((pair, rate_str, signal))
+with st.spinner("Fetching live Forex rates..."):
+    forex_rates = fetch_forex_rates(FOREX_PAIRS)
 
-    # Table
-    st.table(
-        [{"Pair": pair, "Rate": rate, "Signal": signal} for pair, rate, signal in forex_rows]
-    )
-
-# --- FUTURE: Charts, statistics, history, technical analysis ---
-st.markdown("""
-**Planned improvements:**
-- Integrate real macro indicators (FRED, Trading Economics API)
-- Add charts for Forex pairs
-- Display historical performance and volatility
-- Technical analysis signals (RSI, MACD, etc.)
-- Multi-API support and configuration
-""")
+st.subheader("💱 Forex Pairs Rates & Sentiment")
+for pair in FOREX_PAIRS:
+    rate = forex_rates.get(pair)
+    rate_display = f"{rate:.5f}" if rate else "N/A"
+    st.write(f"**{pair}**: {rate_display}")
 
 st.caption(f"Last updated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-st.caption("👨‍💻 Created by YSNOTT")
