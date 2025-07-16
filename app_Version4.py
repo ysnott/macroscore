@@ -2,7 +2,36 @@ import streamlit as st
 import requests
 import datetime
 import os
+import requests
 
+API_KEY = "59f6d8060a75195604f3f77f0f82f29d"
+BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
+
+def fetch_fred_latest(series_id):
+    url = f"{BASE_URL}?series_id={series_id}&api_key={API_KEY}&file_type=json"
+    r = requests.get(url)
+    data = r.json()
+    try:
+        obs = data["observations"]
+        # Find last non-empty value
+        for ob in reversed(obs):
+            val = ob["value"]
+            if val not in ('', None, '.'):
+                return float(val)
+        return None
+    except Exception:
+        return None
+
+# Example usage:
+cpi = fetch_fred_latest("CPIAUCSL")
+unemployment = fetch_fred_latest("UNRATE")
+interest_rate = fetch_fred_latest("FEDFUNDS")
+gdp_growth = fetch_fred_latest("A191RL1Q225SBEA")
+
+print("CPI:", cpi)
+print("Unemployment Rate:", unemployment)
+print("Interest Rate:", interest_rate)
+print("GDP Growth Rate:", gdp_growth)
 # ====== CONFIG ======
 API_KEY = os.getenv("TWELVE_DATA_API_KEY", "fd361e714c704855964af24234085bc6")
 BASE_URL = "https://api.twelvedata.com"
