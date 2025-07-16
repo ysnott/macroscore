@@ -5,10 +5,11 @@ import datetime
 
 # --- API KEYS & URLS ---
 FRED_API_KEY = os.getenv("FRED_API_KEY", "e072fbb3098e26e777214caac7c036d3")
+FOREX_API_KEY = "40c602106bf2e6545af3686d76a164b8"
+FOREX_API_URL = f"https://v6.exchangerate-api.com/v6/{FOREX_API_KEY}/latest/USD"
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
-FOREX_API_URL = "https://api.exchangerate.host/latest"
 
-# --- Macro Indicators & Pairs ---
+# --- Indicators & Forex Pairs ---
 INDICATORS = {
     "Inflation Rate (CPI YoY %)": "CPIAUCSL",
     "Unemployment Rate": "UNRATE",
@@ -24,14 +25,13 @@ FOREX_PAIRS = [
     "NZD/CAD", "NZD/CHF"
 ]
 
-# --- Helper: Metric Format ---
+# --- Helpers ---
 def format_metric(value, suffix=""):
     try:
         return f"{float(value):.2f}{suffix}" if value is not None else "N/A"
     except:
         return "N/A"
 
-# --- Functions ---
 @st.cache_data(ttl=3600)
 def get_fred_data(series_id):
     params = {
@@ -47,37 +47,34 @@ def get_fred_data(series_id):
         observations = data.get("observations", [])
         valid_obs = [obs for obs in observations if obs.get("value") not in (".", "")]
         return float(valid_obs[-1]["value"]) if valid_obs else None
-    except Exception as e:
-        st.warning(f"Unable to fetch data for {series_id}.")
+    except Exception:
         return None
 
 @st.cache_data(ttl=600)
 def fetch_forex_rates(pairs):
-    base = "USD"
     try:
-        url = f"{FOREX_API_URL}?base={base}"
-        response = requests.get(url)
+        response = requests.get(FOREX_API_URL)
         response.raise_for_status()
         data = response.json()
-        rates = {}
+        rates = data.get("conversion_rates", {})
+        result = {}
         for pair in pairs:
-            base_curr, quote_curr = pair.split('/')
+            base, quote = pair.split('/')
             try:
-                if base_curr == base:
-                    rate = data['rates'].get(quote_curr)
-                elif quote_curr == base:
-                    base_curr_rate = data['rates'].get(base_curr)
-                    rate = 1 / base_curr_rate if base_curr_rate else None
+                if base == "USD":
+                    rate = rates.get(quote)
+                elif quote == "USD":
+                    base_rate = rates.get(base)
+                    rate = 1 / base_rate if base_rate else None
                 else:
-                    base_curr_rate = data['rates'].get(base_curr)
-                    quote_curr_rate = data['rates'].get(quote_curr)
-                    rate = (1 / base_curr_rate) * quote_curr_rate if base_curr_rate and quote_curr_rate else None
-                rates[pair] = round(rate, 5) if rate else "N/A"
+                    base_rate = rates.get(base)
+                    quote_rate = rates.get(quote)
+                    rate = (1 / base_rate) * quote_rate if base_rate and quote_rate else None
+                result[pair] = round(rate, 5) if rate else "N/A"
             except:
-                rates[pair] = "N/A"
-        return rates
-    except Exception as e:
-        st.warning("Unable to fetch Forex data.")
+                result[pair] = "N/A"
+        return result
+    except Exception:
         return {pair: "N/A" for pair in pairs}
 
 def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
@@ -99,12 +96,12 @@ def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
     else:
         return "Strong Bearish"
 
-# --- Streamlit App ---
+# --- Streamlit UI ---
 st.set_page_config(page_title="MacroScore Dashboard with Forex", layout="wide")
 st.title("📊 MacroScore Real-Time Dashboard with Forex Pairs")
-st.markdown("Dashboard يحلل المؤشرات الاقتصادية من FRED ويربطها بأسعار الفوركس (Forex) الحية من exchangerate.host")
+st.markdown("Dashboard يحلل المؤشرات الاقتصادية من FRED ويربطها بأسعار الفوركس (Forex) الحية من exchangerate-api.com")
 
-# --- Data Section ---
+# --- Macroeconomic Data ---
 with st.spinner("Fetching macroeconomic data..."):
     inflation = get_fred_data(INDICATORS["Inflation Rate (CPI YoY %)"])
     unemployment = get_fred_data(INDICATORS["Unemployment Rate"])
@@ -112,7 +109,6 @@ with st.spinner("Fetching macroeconomic data..."):
     gdp = get_fred_data(INDICATORS["GDP Growth Rate"])
     dollar_index = get_fred_data(INDICATORS["USD Index"])
 
-# --- Metrics Display ---
 st.subheader("📈 Latest Macroeconomic Indicators")
 cols = st.columns(5)
 cols[0].metric("Inflation Rate (CPI YoY %)", format_metric(inflation, "%"))
@@ -121,7 +117,7 @@ cols[2].metric("Interest Rate", format_metric(interest_rate, "%"))
 cols[3].metric("GDP Growth Rate", format_metric(gdp, "%"))
 cols[4].metric("USD Index", format_metric(dollar_index))
 
-# --- Sentiment Score ---
+# --- Sentiment Analysis ---
 sentiment = score_market(inflation, unemployment, interest_rate, gdp, dollar_index)
 sentiment_color = {
     "Strong Bullish": "🟢",
@@ -134,7 +130,7 @@ sentiment_color = {
 st.subheader("📉 Market Sentiment Based on Macro Score")
 st.markdown(f"### {sentiment_color} **{sentiment}**")
 
-# --- Forex Rates Section ---
+# --- Forex Section ---
 with st.spinner("Fetching live Forex rates..."):
     forex_rates = fetch_forex_rates(FOREX_PAIRS)
 
