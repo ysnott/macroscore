@@ -1,13 +1,13 @@
+import os
 import streamlit as st
 import requests
 import datetime
-import os  # For securely loading environment variables
 
 # --- API KEYS & URLS ---
-# Use environment variables for API keys instead of hardcoding them
-FRED_API_KEY = os.getenv("FRED_API_KEY", "your_fred_api_key_here")  # Replace with actual API key or load from .env
-FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
+FRED_API_KEY = os.getenv("FRED_API_KEY", "e072fbb3098e26e777214caac7c036d3")  # Replace with default if needed
+FOREX_API_KEY = os.getenv("FOREX_API_KEY", "40c602106bf2e6545af3686d76a164b8")  # Replace with default if needed
 
+FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 FOREX_API_URL = "https://api.exchangerate.host/latest"
 
 # --- Macro Indicators & Pairs ---
@@ -27,11 +27,7 @@ FOREX_PAIRS = [
 ]
 
 # --- Functions ---
-
 def get_fred_data(series_id):
-    """
-    Fetch data for a given FRED series ID.
-    """
     params = {
         "series_id": series_id,
         "api_key": FRED_API_KEY,
@@ -49,37 +45,10 @@ def get_fred_data(series_id):
         st.error(f"Error fetching data for {series_id}: {e}")
         return None
 
-
-def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
-    """
-    Score the market based on macroeconomic indicators.
-    """
-    score = 0
-    if inflation is not None and inflation < 3: score += 1
-    if unemployment is not None and unemployment < 4.5: score += 1
-    if interest_rate is not None and interest_rate < 3: score += 1
-    if gdp is not None and gdp > 2: score += 1
-    if dollar_index is not None and dollar_index > 110: score += 1
-
-    if score == 5:
-        return "Strong Bullish"
-    elif score >= 3:
-        return "Bullish"
-    elif score == 2:
-        return "Neutral"
-    elif score == 1:
-        return "Bearish"
-    else:
-        return "Strong Bearish"
-
-
 def fetch_forex_rates(pairs):
-    """
-    Fetch live Forex rates for the specified currency pairs.
-    """
     base = "USD"
     try:
-        url = f"{FOREX_API_URL}?base={base}"
+        url = f"{FOREX_API_URL}?base={base}&apikey={FOREX_API_KEY}"
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
@@ -107,7 +76,7 @@ def fetch_forex_rates(pairs):
         st.error(f"Error fetching Forex data: {e}")
         return {pair: None for pair in pairs}
 
-# --- Streamlit UI ---
+# --- Streamlit App ---
 st.set_page_config(page_title="MacroScore Dashboard with Forex", layout="wide")
 st.title("📊 MacroScore Real-Time Dashboard with Forex Pairs")
 st.markdown("Dashboard يحلل المؤشرات الاقتصادية من FRED ويربطها بأسعار الفوركس (Forex) الحية من exchangerate.host")
@@ -126,18 +95,6 @@ cols[1].metric("Unemployment Rate", f"{unemployment:.2f}%" if unemployment is no
 cols[2].metric("Interest Rate", f"{interest_rate:.2f}%" if interest_rate is not None else "N/A")
 cols[3].metric("GDP Growth Rate", f"{gdp:.2f}%" if gdp is not None else "N/A")
 cols[4].metric("USD Index", f"{dollar_index:.2f}" if dollar_index is not None else "N/A")
-
-sentiment = score_market(inflation, unemployment, interest_rate, gdp, dollar_index)
-sentiment_color = {
-    "Strong Bullish": "🟢",
-    "Bullish": "🟩",
-    "Neutral": "⚪",
-    "Bearish": "🔻",
-    "Strong Bearish": "🔴"
-}.get(sentiment, "❓")
-
-st.subheader("📉 Market Sentiment Based on Macro Score")
-st.markdown(f"### {sentiment_color} **{sentiment}**")
 
 with st.spinner("Fetching live Forex rates..."):
     forex_rates = fetch_forex_rates(FOREX_PAIRS)
