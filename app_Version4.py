@@ -9,16 +9,16 @@ FOREX_PAIRS = [
     "EUR/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CAD", "GBP/USD", "USD/CHF", "EUR/GBP"
 ]
 
-def fetch_latest_price(pair):
-    url = f"{BASE_URL}/time_series?symbol={pair}&interval=1min&apikey={API_KEY}&outputsize=2"
+def fetch_price_history(pair):
+    url = f"{BASE_URL}/time_series?symbol={pair}&interval=1min&apikey={API_KEY}&outputsize=10"
     try:
         r = requests.get(url)
         r.raise_for_status()
         data = r.json()
         if "values" in data and len(data["values"]) >= 2:
-            current = float(data["values"][0]["close"])
-            previous = float(data["values"][1]["close"])
-            return current, previous
+            latest = float(data["values"][0]["close"])
+            oldest = float(data["values"][-1]["close"])
+            return latest, oldest
         elif "values" in data and len(data["values"]) == 1:
             return float(data["values"][0]["close"]), None
         return None, None
@@ -26,45 +26,56 @@ def fetch_latest_price(pair):
         st.warning(f"Error fetching {pair}: {e}")
         return None, None
 
-def get_signal(current, previous):
-    if current is None or previous is None:
+def get_signal(latest, oldest):
+    if latest is None or oldest is None:
         return "❓ N/A"
-    change = current - previous
-    if abs(change) < 0.0001:  # very flat, could be a tight spread
+    if abs(latest - oldest) < 0.00005:
         return "⚪ Neutral"
-    elif change > 0:
+    if latest > oldest:
         return "🟢 Bullish"
     else:
         return "🔴 Bearish"
+
+def fetch_dxy():
+    url = f"{BASE_URL}/time_series?symbol=DXY&interval=1min&apikey={API_KEY}&outputsize=1"
+    try:
+        r = requests.get(url)
+        r.raise_for_status()
+        data = r.json()
+        if "values" in data and len(data["values"]) >= 1:
+            return float(data["values"][0]["close"])
+        return None
+    except Exception as e:
+        st.warning("DXY not available in your plan or missing from Twelve Data.")
+        return None
 
 st.set_page_config(page_title="MacroScore Dashboard", layout="wide")
 st.title("📊 MacroScore Real-Time Dashboard with Forex Pairs")
 st.markdown("**All data live from Twelve Data API**")
 
-# Macro indicators not available via Twelve Data, set N/A
+st.subheader("📈 Latest Macroeconomic Indicators")
 cols = st.columns(5)
 cols[0].metric("Inflation Rate (YoY %)", "N/A")
 cols[1].metric("Unemployment Rate", "N/A")
 cols[2].metric("Interest Rate", "N/A")
 cols[3].metric("GDP Growth Rate", "N/A")
 with st.spinner("Fetching DXY..."):
-    # DXY may not exist in your plan, so fallback to N/A
-    dxy_price, _ = fetch_latest_price("DXY")
-cols[4].metric("USD Index (DXY)", f"{dxy_price:.2f}" if dxy_price is not None else "N/A")
+    dxy_price = fetch_dxy()
+dxy_val = f"{dxy_price:.2f}" if dxy_price is not None else "N/A"
+cols[4].metric("USD Index (DXY)", dxy_val)
+if dxy_price is None:
+    st.info("Twelve Data does not provide macroeconomic indicators. For macro data, use FRED or Trading Economics.")
 
-# Since macro indicators are N/A, sentiment will always be "Strong Bearish"
-sentiment = "Strong Bearish"
-sentiment_color = "🔴"
 st.subheader("📉 Market Sentiment Based on Macro Score")
-st.markdown(f"### {sentiment_color} **{sentiment}**")
+st.markdown("### 🔴 **Strong Bearish** (Macro signals not available)")
 
 st.subheader("💱 Forex Pairs Rates & Signals")
 with st.spinner("Fetching live Forex rates and signals..."):
     for pair in FOREX_PAIRS:
-        current, previous = fetch_latest_price(pair)
-        signal = get_signal(current, previous)
-        if current is not None:
-            st.write(f"**{pair}**: {current:.5f} — {signal}")
+        latest, oldest = fetch_price_history(pair)
+        signal = get_signal(latest, oldest)
+        if latest is not None:
+            st.write(f"**{pair}**: {latest:.5f} — {signal}")
         else:
             st.write(f"**{pair}**: N/A — {signal}")
 
