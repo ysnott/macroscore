@@ -5,10 +5,9 @@ import datetime
 
 # --- API KEYS & URLS ---
 FRED_API_KEY = os.getenv("FRED_API_KEY", "e072fbb3098e26e777214caac7c036d3")  # Replace with your FRED API Key
-FOREX_API_KEY = os.getenv("FOREX_API_KEY", "40c602106bf2e6545af3686d76a164b8")  # Replace with your Forex API Key
+FOREX_API_URL = "https://api.exchangerate.host/latest"
 
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
-FOREX_API_URL = "https://api.exchangerate.host/latest"
 
 # --- Macro Indicators & Pairs ---
 INDICATORS = {
@@ -16,7 +15,7 @@ INDICATORS = {
     "Unemployment Rate": "UNRATE",
     "Federal Funds Rate": "FEDFUNDS",
     "GDP Growth Rate": "A191RL1Q225SBEA",
-    "USD Index": "DTWEXAFEGS"  # Change to DTWEXBGS or another series based on your requirement
+    "USD Index": "DTWEXBGS"  # Changed to Nominal Broad USD Index
 }
 
 FOREX_PAIRS = [
@@ -28,9 +27,6 @@ FOREX_PAIRS = [
 
 # --- Functions ---
 def get_fred_data(series_id):
-    """
-    Fetch data for a given FRED series ID.
-    """
     params = {
         "series_id": series_id,
         "api_key": FRED_API_KEY,
@@ -49,76 +45,7 @@ def get_fred_data(series_id):
         return None
 
 
-def get_fred_cpi_yoy(series_id):
-    """
-    Calculate Year-over-Year (YoY) inflation rate based on FRED CPI series data.
-    """
-    params = {
-        "series_id": series_id,
-        "api_key": FRED_API_KEY,
-        "file_type": "json",
-        "limit": 500,
-    }
-    try:
-        response = requests.get(FRED_BASE_URL, params=params)
-        response.raise_for_status()
-        data = response.json()
-        observations = data.get("observations", [])
-
-        valid_obs = [obs for obs in observations if obs.get("value") not in (".", "")]
-        if len(valid_obs) < 13:
-            return None  # Insufficient data for YoY calculation
-
-        latest = valid_obs[-1]
-        latest_date = latest["date"]
-        latest_value = float(latest["value"])
-
-        target_year = int(latest_date[:4]) - 1
-        target_month = latest_date[5:7]
-
-        prev_year_value = None
-        for obs in valid_obs:
-            if obs["date"].startswith(f"{target_year}-{target_month}"):
-                prev_year_value = float(obs["value"])
-                break
-
-        if prev_year_value is None:
-            return None
-
-        yoy = ((latest_value - prev_year_value) / prev_year_value) * 100
-        return yoy
-    except Exception as e:
-        st.error(f"Error fetching CPI YoY data: {e}")
-        return None
-
-
-def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
-    """
-    Score the market based on macroeconomic indicators.
-    """
-    score = 0
-    if inflation is not None and inflation < 3: score += 1
-    if unemployment is not None and unemployment < 4.5: score += 1
-    if interest_rate is not None and interest_rate < 3: score += 1
-    if gdp is not None and gdp > 0: score += 1  # Positive GDP growth is good
-    if dollar_index is not None and dollar_index > 95: score += 1  # Adjusted threshold for USD Index
-
-    if score == 5:
-        return "Strong Bullish"
-    elif score >= 3:
-        return "Bullish"
-    elif score == 2:
-        return "Neutral"
-    elif score == 1:
-        return "Bearish"
-    else:
-        return "Strong Bearish"
-
-
 def fetch_forex_rates(pairs):
-    """
-    Fetch live Forex rates for the specified currency pairs.
-    """
     base = "USD"
     try:
         url = f"{FOREX_API_URL}?base={base}"
@@ -133,7 +60,7 @@ def fetch_forex_rates(pairs):
                     rate = data['rates'].get(quote_curr)
                 elif quote_curr == base:
                     base_curr_rate = data['rates'].get(base_curr)
-                    rate = 1 / base_curr_rate if base_curr_rate and base_curr_rate != 0 else None
+                    rate = 1 / base_curr_rate if base_curr_rate != 0 else None
                 else:
                     base_curr_rate = data['rates'].get(base_curr)
                     quote_curr_rate = data['rates'].get(quote_curr)
@@ -141,13 +68,33 @@ def fetch_forex_rates(pairs):
                         rate = (1 / base_curr_rate) * quote_curr_rate
                     else:
                         rate = None
-                rates[pair] = round(rate, 5) if rate else None
+                rates[pair] = round(rate, 5) if rate else "N/A"
             except:
-                rates[pair] = None
+                rates[pair] = "N/A"
         return rates
     except Exception as e:
         st.error(f"Error fetching Forex data: {e}")
-        return {pair: None for pair in pairs}
+        return {pair: "N/A" for pair in pairs}
+
+
+def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
+    score = 0
+    if inflation is not None and inflation < 3: score += 1
+    if unemployment is not None and unemployment < 4.5: score += 1
+    if interest_rate is not None and interest_rate < 3: score += 1
+    if gdp is not None and gdp > 0: score += 1
+    if dollar_index is not None and dollar_index > 95: score += 1
+
+    if score == 5:
+        return "Strong Bullish"
+    elif score >= 3:
+        return "Bullish"
+    elif score == 2:
+        return "Neutral"
+    elif score == 1:
+        return "Bearish"
+    else:
+        return "Strong Bearish"
 
 # --- Streamlit App ---
 st.set_page_config(page_title="MacroScore Dashboard with Forex", layout="wide")
@@ -155,7 +102,7 @@ st.title("📊 MacroScore Real-Time Dashboard with Forex Pairs")
 st.markdown("Dashboard يحلل المؤشرات الاقتصادية من FRED ويربطها بأسعار الفوركس (Forex) الحية من exchangerate.host")
 
 with st.spinner("Fetching macroeconomic data..."):
-    inflation = get_fred_cpi_yoy(INDICATORS["Inflation Rate (CPI YoY %)"])
+    inflation = get_fred_data(INDICATORS["Inflation Rate (CPI YoY %)"])
     unemployment = get_fred_data(INDICATORS["Unemployment Rate"])
     interest_rate = get_fred_data(INDICATORS["Federal Funds Rate"])
     gdp = get_fred_data(INDICATORS["GDP Growth Rate"])
@@ -187,7 +134,6 @@ with st.spinner("Fetching live Forex rates..."):
 st.subheader("💱 Forex Pairs Rates & Sentiment")
 for pair in FOREX_PAIRS:
     rate = forex_rates.get(pair)
-    rate_display = f"{rate:.5f}" if rate else "N/A"
-    st.write(f"**{pair}**: {rate_display}")
+    st.write(f"**{pair}**: {rate}")
 
 st.caption(f"Last updated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
