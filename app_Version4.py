@@ -45,10 +45,73 @@ def get_fred_data(series_id):
         st.error(f"Error fetching data for {series_id}: {e}")
         return None
 
+def get_fred_cpi_yoy(series_id):
+    params = {
+        "series_id": series_id,
+        "api_key": FRED_API_KEY,
+        "file_type": "json",
+        "limit": 500,
+    }
+    try:
+        response = requests.get(FRED_BASE_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
+        observations = data.get("observations", [])
+
+        # Filter valid observations
+        valid_obs = [obs for obs in observations if obs.get("value") not in (".", "")]
+        
+        if len(valid_obs) < 13:
+            return None  # Insufficient data for YoY calculation
+        
+        # Get the latest value
+        latest = valid_obs[-1]
+        latest_date = latest["date"]
+        latest_value = float(latest["value"])
+
+        # Get the value from the same month last year
+        target_year = int(latest_date[:4]) - 1
+        target_month = latest_date[5:7]
+
+        prev_year_value = None
+        for obs in valid_obs:
+            if obs["date"].startswith(f"{target_year}-{target_month}"):
+                prev_year_value = float(obs["value"])
+                break
+        
+        if prev_year_value is None:
+            return None
+        
+        # Calculate YoY percentage change
+        yoy = ((latest_value - prev_year_value) / prev_year_value) * 100
+        return yoy
+    except Exception as e:
+        st.error(f"Error fetching CPI YoY data: {e}")
+        return None
+
+def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
+    score = 0
+    if inflation is not None and inflation < 3: score += 1
+    if unemployment is not None and unemployment < 4.5: score += 1
+    if interest_rate is not None and interest_rate < 3: score += 1
+    if gdp is not None and gdp > 0: score += 1  # Positive GDP growth is good
+    if dollar_index is not None and dollar_index > 95: score += 1  # Adjusted threshold for USD Index
+
+    if score == 5:
+        return "Strong Bullish"
+    elif score >= 3:
+        return "Bullish"
+    elif score == 2:
+        return "Neutral"
+    elif score == 1:
+        return "Bearish"
+    else:
+        return "Strong Bearish"
+
 def fetch_forex_rates(pairs):
     base = "USD"
     try:
-        url = f"{FOREX_API_URL}?base={base}&apikey={FOREX_API_KEY}"
+        url = f"{FOREX_API_URL}?base={base}"
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
@@ -82,7 +145,7 @@ st.title("📊 MacroScore Real-Time Dashboard with Forex Pairs")
 st.markdown("Dashboard يحلل المؤشرات الاقتصادية من FRED ويربطها بأسعار الفوركس (Forex) الحية من exchangerate.host")
 
 with st.spinner("Fetching macroeconomic data..."):
-    inflation = get_fred_data(INDICATORS["Inflation Rate (CPI YoY %)"])
+    inflation = get_fred_cpi_yoy(INDICATORS["Inflation Rate (CPI YoY %)"])
     unemployment = get_fred_data(INDICATORS["Unemployment Rate"])
     interest_rate = get_fred_data(INDICATORS["Federal Funds Rate"])
     gdp = get_fred_data(INDICATORS["GDP Growth Rate"])
@@ -95,6 +158,18 @@ cols[1].metric("Unemployment Rate", f"{unemployment:.2f}%" if unemployment is no
 cols[2].metric("Interest Rate", f"{interest_rate:.2f}%" if interest_rate is not None else "N/A")
 cols[3].metric("GDP Growth Rate", f"{gdp:.2f}%" if gdp is not None else "N/A")
 cols[4].metric("USD Index", f"{dollar_index:.2f}" if dollar_index is not None else "N/A")
+
+sentiment = score_market(inflation, unemployment, interest_rate, gdp, dollar_index)
+sentiment_color = {
+    "Strong Bullish": "🟢",
+    "Bullish": "🟩",
+    "Neutral": "⚪",
+    "Bearish": "🔻",
+    "Strong Bearish": "🔴"
+}.get(sentiment, "❓")
+
+st.subheader("📉 Market Sentiment Based on Macro Score")
+st.markdown(f"### {sentiment_color} **{sentiment}**")
 
 with st.spinner("Fetching live Forex rates..."):
     forex_rates = fetch_forex_rates(FOREX_PAIRS)
