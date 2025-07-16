@@ -4,10 +4,9 @@ import requests
 import datetime
 
 # --- API KEYS & URLS ---
-FRED_API_KEY = os.getenv("FRED_API_KEY", "e072fbb3098e26e777214caac7c036d3")  # Replace with your FRED API Key
-FOREX_API_URL = "https://api.exchangerate.host/latest"
-
+FRED_API_KEY = os.getenv("FRED_API_KEY", "e072fbb3098e26e777214caac7c036d3")
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
+FOREX_API_URL = "https://api.exchangerate.host/latest"
 
 # --- Macro Indicators & Pairs ---
 INDICATORS = {
@@ -15,7 +14,7 @@ INDICATORS = {
     "Unemployment Rate": "UNRATE",
     "Federal Funds Rate": "FEDFUNDS",
     "GDP Growth Rate": "A191RL1Q225SBEA",
-    "USD Index": "DTWEXBGS"  # Changed to Nominal Broad USD Index
+    "USD Index": "DTWEXBGS"
 }
 
 FOREX_PAIRS = [
@@ -25,7 +24,15 @@ FOREX_PAIRS = [
     "NZD/CAD", "NZD/CHF"
 ]
 
+# --- Helper: Metric Format ---
+def format_metric(value, suffix=""):
+    try:
+        return f"{float(value):.2f}{suffix}" if value is not None else "N/A"
+    except:
+        return "N/A"
+
 # --- Functions ---
+@st.cache_data(ttl=3600)
 def get_fred_data(series_id):
     params = {
         "series_id": series_id,
@@ -41,10 +48,10 @@ def get_fred_data(series_id):
         valid_obs = [obs for obs in observations if obs.get("value") not in (".", "")]
         return float(valid_obs[-1]["value"]) if valid_obs else None
     except Exception as e:
-        st.error(f"Error fetching data for {series_id}: {e}")
+        st.warning(f"Unable to fetch data for {series_id}.")
         return None
 
-
+@st.cache_data(ttl=600)
 def fetch_forex_rates(pairs):
     base = "USD"
     try:
@@ -60,22 +67,18 @@ def fetch_forex_rates(pairs):
                     rate = data['rates'].get(quote_curr)
                 elif quote_curr == base:
                     base_curr_rate = data['rates'].get(base_curr)
-                    rate = 1 / base_curr_rate if base_curr_rate != 0 else None
+                    rate = 1 / base_curr_rate if base_curr_rate else None
                 else:
                     base_curr_rate = data['rates'].get(base_curr)
                     quote_curr_rate = data['rates'].get(quote_curr)
-                    if base_curr_rate and quote_curr_rate:
-                        rate = (1 / base_curr_rate) * quote_curr_rate
-                    else:
-                        rate = None
+                    rate = (1 / base_curr_rate) * quote_curr_rate if base_curr_rate and quote_curr_rate else None
                 rates[pair] = round(rate, 5) if rate else "N/A"
             except:
                 rates[pair] = "N/A"
         return rates
     except Exception as e:
-        st.error(f"Error fetching Forex data: {e}")
+        st.warning("Unable to fetch Forex data.")
         return {pair: "N/A" for pair in pairs}
-
 
 def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
     score = 0
@@ -101,6 +104,7 @@ st.set_page_config(page_title="MacroScore Dashboard with Forex", layout="wide")
 st.title("📊 MacroScore Real-Time Dashboard with Forex Pairs")
 st.markdown("Dashboard يحلل المؤشرات الاقتصادية من FRED ويربطها بأسعار الفوركس (Forex) الحية من exchangerate.host")
 
+# --- Data Section ---
 with st.spinner("Fetching macroeconomic data..."):
     inflation = get_fred_data(INDICATORS["Inflation Rate (CPI YoY %)"])
     unemployment = get_fred_data(INDICATORS["Unemployment Rate"])
@@ -108,14 +112,16 @@ with st.spinner("Fetching macroeconomic data..."):
     gdp = get_fred_data(INDICATORS["GDP Growth Rate"])
     dollar_index = get_fred_data(INDICATORS["USD Index"])
 
+# --- Metrics Display ---
 st.subheader("📈 Latest Macroeconomic Indicators")
 cols = st.columns(5)
-cols[0].metric("Inflation Rate (CPI YoY %)", f"{inflation:.2f}%" if inflation is not None else "N/A")
-cols[1].metric("Unemployment Rate", f"{unemployment:.2f}%" if unemployment is not None else "N/A")
-cols[2].metric("Interest Rate", f"{interest_rate:.2f}%" if interest_rate is not None else "N/A")
-cols[3].metric("GDP Growth Rate", f"{gdp:.2f}%" if gdp is not None else "N/A")
-cols[4].metric("USD Index", f"{dollar_index:.2f}" if dollar_index is not None else "N/A")
+cols[0].metric("Inflation Rate (CPI YoY %)", format_metric(inflation, "%"))
+cols[1].metric("Unemployment Rate", format_metric(unemployment, "%"))
+cols[2].metric("Interest Rate", format_metric(interest_rate, "%"))
+cols[3].metric("GDP Growth Rate", format_metric(gdp, "%"))
+cols[4].metric("USD Index", format_metric(dollar_index))
 
+# --- Sentiment Score ---
 sentiment = score_market(inflation, unemployment, interest_rate, gdp, dollar_index)
 sentiment_color = {
     "Strong Bullish": "🟢",
@@ -128,12 +134,14 @@ sentiment_color = {
 st.subheader("📉 Market Sentiment Based on Macro Score")
 st.markdown(f"### {sentiment_color} **{sentiment}**")
 
+# --- Forex Rates Section ---
 with st.spinner("Fetching live Forex rates..."):
     forex_rates = fetch_forex_rates(FOREX_PAIRS)
 
 st.subheader("💱 Forex Pairs Rates & Sentiment")
-for pair in FOREX_PAIRS:
+cols = st.columns(3)
+for i, pair in enumerate(FOREX_PAIRS):
     rate = forex_rates.get(pair)
-    st.write(f"**{pair}**: {rate}")
+    cols[i % 3].markdown(f"**{pair}**: {rate}")
 
 st.caption(f"Last updated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
