@@ -4,8 +4,8 @@ import requests
 import datetime
 
 # --- API KEYS & URLS ---
-FRED_API_KEY = os.getenv("FRED_API_KEY", "e072fbb3098e26e777214caac7c036d3")  # Replace with default if needed
-FOREX_API_KEY = os.getenv("FOREX_API_KEY", "40c602106bf2e6545af3686d76a164b8")  # Replace with default if needed
+FRED_API_KEY = os.getenv("FRED_API_KEY", "e072fbb3098e26e777214caac7c036d3")  # Replace with your FRED API Key
+FOREX_API_KEY = os.getenv("FOREX_API_KEY", "40c602106bf2e6545af3686d76a164b8")  # Replace with your Forex API Key
 
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 FOREX_API_URL = "https://api.exchangerate.host/latest"
@@ -16,7 +16,7 @@ INDICATORS = {
     "Unemployment Rate": "UNRATE",
     "Federal Funds Rate": "FEDFUNDS",
     "GDP Growth Rate": "A191RL1Q225SBEA",
-    "USD Index": "DTWEXAFEGS"
+    "USD Index": "DTWEXAFEGS"  # Change to DTWEXBGS or another series based on your requirement
 }
 
 FOREX_PAIRS = [
@@ -28,6 +28,9 @@ FOREX_PAIRS = [
 
 # --- Functions ---
 def get_fred_data(series_id):
+    """
+    Fetch data for a given FRED series ID.
+    """
     params = {
         "series_id": series_id,
         "api_key": FRED_API_KEY,
@@ -45,7 +48,11 @@ def get_fred_data(series_id):
         st.error(f"Error fetching data for {series_id}: {e}")
         return None
 
+
 def get_fred_cpi_yoy(series_id):
+    """
+    Calculate Year-over-Year (YoY) inflation rate based on FRED CPI series data.
+    """
     params = {
         "series_id": series_id,
         "api_key": FRED_API_KEY,
@@ -58,18 +65,14 @@ def get_fred_cpi_yoy(series_id):
         data = response.json()
         observations = data.get("observations", [])
 
-        # Filter valid observations
         valid_obs = [obs for obs in observations if obs.get("value") not in (".", "")]
-        
         if len(valid_obs) < 13:
             return None  # Insufficient data for YoY calculation
-        
-        # Get the latest value
+
         latest = valid_obs[-1]
         latest_date = latest["date"]
         latest_value = float(latest["value"])
 
-        # Get the value from the same month last year
         target_year = int(latest_date[:4]) - 1
         target_month = latest_date[5:7]
 
@@ -78,18 +81,21 @@ def get_fred_cpi_yoy(series_id):
             if obs["date"].startswith(f"{target_year}-{target_month}"):
                 prev_year_value = float(obs["value"])
                 break
-        
+
         if prev_year_value is None:
             return None
-        
-        # Calculate YoY percentage change
+
         yoy = ((latest_value - prev_year_value) / prev_year_value) * 100
         return yoy
     except Exception as e:
         st.error(f"Error fetching CPI YoY data: {e}")
         return None
 
+
 def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
+    """
+    Score the market based on macroeconomic indicators.
+    """
     score = 0
     if inflation is not None and inflation < 3: score += 1
     if unemployment is not None and unemployment < 4.5: score += 1
@@ -108,7 +114,11 @@ def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
     else:
         return "Strong Bearish"
 
+
 def fetch_forex_rates(pairs):
+    """
+    Fetch live Forex rates for the specified currency pairs.
+    """
     base = "USD"
     try:
         url = f"{FOREX_API_URL}?base={base}"
