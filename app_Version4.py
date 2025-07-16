@@ -1,4 +1,5 @@
 import os
+import time
 import streamlit as st
 import requests
 import datetime
@@ -20,9 +21,7 @@ INDICATORS = {
 
 FOREX_PAIRS = [
     "EUR/USD", "AUD/USD", "NZD/USD", "EUR/CAD", "AUD/JPY", "NZD/JPY",
-    "AUD/CAD", "NZD/CAD", "USD/JPY", "USD/CAD", "EUR/GBP", "EUR/CHF",
-    "CAD/JPY", "GBP/CAD", "AUD/CHF", "NZD/CHF", "GBP/USD", "USD/CHF",
-    "EUR/AUD", "GBP/JPY", "CHF/JPY", "GBP/CHF", "CAD/CHF"
+    "AUD/CAD", "NZD/CAD", "USD/JPY"
 ]
 
 # --- Functions ---
@@ -146,7 +145,10 @@ st.subheader("📉 Market Sentiment Based on Macro Score")
 st.markdown(f"### {sentiment_color} **{sentiment}**")
 
 with st.spinner("Fetching live Forex rates..."):
-    forex_rates = {pair: fetch_forex_rate(pair) for pair in FOREX_PAIRS}
+    forex_rates = {}
+    for pair in FOREX_PAIRS:
+        forex_rates[pair] = fetch_forex_rate(pair)
+        time.sleep(1)  # To respect API rate limits
 
 st.subheader("💱 Forex Pairs Rates")
 for pair, rate in forex_rates.items():
