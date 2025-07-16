@@ -47,25 +47,30 @@ def get_fred_data(series_id):
         return None
 
 
-def fetch_forex_rate(pair):
+def fetch_forex_rates(pairs):
     """
-    Fetch real-time Forex rate using Twelve Data API.
+    Fetch live Forex rates in batches to respect API rate limits.
     """
-    try:
-        url = f"{TWELVE_DATA_BASE_URL}?symbol={pair}&interval=1min&apikey={TWELVE_DATA_API_KEY}"
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        if "values" in data:
-            latest = data["values"][0]  # Get the latest data point
-            rate = float(latest["close"])  # Use the close price as the rate
-            return rate
-        else:
-            st.error(f"Error fetching Forex rate for {pair}: {data.get('message', 'Unknown error')}")
-            return None
-    except Exception as e:
-        st.error(f"Error fetching Forex rate for {pair}: {e}")
-        return None
+    rates = {}
+    for i, pair in enumerate(pairs):
+        if i > 0 and i % 8 == 0:  # Respect API rate limit by pausing after every 8 requests
+            time.sleep(60)
+        
+        try:
+            url = f"{TWELVE_DATA_BASE_URL}?symbol={pair}&interval=1min&apikey={TWELVE_DATA_API_KEY}"
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+            if "values" in data:
+                latest = data["values"][0]  # Get the latest data point
+                rate = float(latest["close"])  # Use the close price as the rate
+                rates[pair] = rate
+            else:
+                rates[pair] = None
+        except Exception as e:
+            st.error(f"Error fetching Forex rate for {pair}: {e}")
+            rates[pair] = None
+    return rates
 
 
 def fetch_dxy_price():
@@ -145,10 +150,7 @@ st.subheader("📉 Market Sentiment Based on Macro Score")
 st.markdown(f"### {sentiment_color} **{sentiment}**")
 
 with st.spinner("Fetching live Forex rates..."):
-    forex_rates = {}
-    for pair in FOREX_PAIRS:
-        forex_rates[pair] = fetch_forex_rate(pair)
-        time.sleep(1)  # To respect API rate limits
+    forex_rates = fetch_forex_rates(FOREX_PAIRS)
 
 st.subheader("💱 Forex Pairs Rates")
 for pair, rate in forex_rates.items():
