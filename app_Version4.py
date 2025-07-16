@@ -6,16 +6,18 @@ import datetime
 # --- API KEYS & URLS ---
 FRED_API_KEY = os.getenv("FRED_API_KEY", "e072fbb3098e26e777214caac7c036d3")
 FOREX_API_KEY = "40c602106bf2e6545af3686d76a164b8"
+TWELVE_API_KEY = "fd361e714c704855964af24234085bc6"
+
 FOREX_API_URL = f"https://v6.exchangerate-api.com/v6/{FOREX_API_KEY}/latest/USD"
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
+DXY_REALTIME_URL = f"https://api.twelvedata.com/price?symbol=DXY&apikey={TWELVE_API_KEY}"
 
 # --- Indicators & Forex Pairs ---
 INDICATORS = {
     "CPI Index": "CPIAUCSL",
     "Unemployment Rate": "UNRATE",
     "Federal Funds Rate": "FEDFUNDS",
-    "GDP Growth Rate": "A191RL1Q225SBEA",
-    "USD Index (DXY Approx)": "DTWEXBGS"
+    "GDP Growth Rate": "A191RL1Q225SBEA"
 }
 
 FOREX_PAIRS = [
@@ -47,15 +49,23 @@ def get_fred_data(series_id):
         observations = [
             obs for obs in data["observations"] if obs["value"] not in (".", "")
         ]
-        if not observations or len(observations) < 2:
+        if not observations or len(observations) < 12:
             return None
-
         latest = float(observations[0]["value"])
-        previous = float(observations[12]["value"])  # 12 months ago
+        previous = float(observations[12]["value"])
         if series_id == "CPIAUCSL":
-            yoy_inflation = ((latest - previous) / previous) * 100
-            return round(yoy_inflation, 2)
+            return round(((latest - previous) / previous) * 100, 2)
         return latest
+    except Exception:
+        return None
+
+@st.cache_data(ttl=300)
+def get_dxy_realtime():
+    try:
+        response = requests.get(DXY_REALTIME_URL)
+        response.raise_for_status()
+        data = response.json()
+        return float(data["price"])
     except Exception:
         return None
 
@@ -108,25 +118,26 @@ def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
 # --- Streamlit UI ---
 st.set_page_config(page_title="MacroScore Dashboard", layout="wide")
 st.title("📊 MacroScore Real-Time Dashboard with Forex Pairs")
-st.markdown("Real-time macroeconomic indicators from FRED + live Forex rates from ExchangeRate-API")
+st.markdown("Real-time macroeconomic indicators from FRED + live Forex rates + live DXY from Twelve Data")
 
-# --- Macroeconomic Data ---
+# --- Data Section ---
 with st.spinner("Fetching macroeconomic data..."):
     inflation = get_fred_data(INDICATORS["CPI Index"])
     unemployment = get_fred_data(INDICATORS["Unemployment Rate"])
     interest_rate = get_fred_data(INDICATORS["Federal Funds Rate"])
     gdp = get_fred_data(INDICATORS["GDP Growth Rate"])
-    dollar_index = get_fred_data(INDICATORS["USD Index (DXY Approx)"])
+    dollar_index = get_dxy_realtime()
 
+# --- Display Metrics ---
 st.subheader("📈 Latest Macroeconomic Indicators")
 cols = st.columns(5)
 cols[0].metric("Inflation Rate (YoY %)", format_metric(inflation, "%"))
 cols[1].metric("Unemployment Rate", format_metric(unemployment, "%"))
 cols[2].metric("Interest Rate", format_metric(interest_rate, "%"))
 cols[3].metric("GDP Growth Rate", format_metric(gdp, "%"))
-cols[4].metric("USD Index (Approx)", format_metric(dollar_index))
+cols[4].metric("USD Index (Real-Time DXY)", format_metric(dollar_index))
 
-# --- Sentiment Analysis ---
+# --- Market Sentiment ---
 sentiment = score_market(inflation, unemployment, interest_rate, gdp, dollar_index)
 sentiment_color = {
     "Strong Bullish": "🟢",
@@ -139,7 +150,7 @@ sentiment_color = {
 st.subheader("📉 Market Sentiment Based on Macro Score")
 st.markdown(f"### {sentiment_color} **{sentiment}**")
 
-# --- Forex Section ---
+# --- Forex Rates ---
 with st.spinner("Fetching live Forex rates..."):
     forex_rates = fetch_forex_rates(FOREX_PAIRS)
 
