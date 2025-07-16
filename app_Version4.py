@@ -1,13 +1,14 @@
 import streamlit as st
 import requests
 import datetime
+import os  # For securely loading environment variables
 
 # --- API KEYS & URLS ---
-FRED_API_KEY = "ed0f91db6215dd68eaa4aabaa84e3b9c"  # API key FRED حقيقية
+# Use environment variables for API keys instead of hardcoding them
+FRED_API_KEY = os.getenv("FRED_API_KEY", "your_fred_api_key_here")  # Replace with actual API key or load from .env
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 
 FOREX_API_URL = "https://api.exchangerate.host/latest"
-FOREX_API_KEY = "40c602106bf2e6545af3686d76a164b8"  # API key exchangerate.host
 
 # --- Macro Indicators & Pairs ---
 INDICATORS = {
@@ -27,7 +28,10 @@ FOREX_PAIRS = [
 
 # --- Functions ---
 
-def get_fred_cpi_yoy(series_id):
+def get_fred_data(series_id):
+    """
+    Fetch data for a given FRED series ID.
+    """
     params = {
         "series_id": series_id,
         "api_key": FRED_API_KEY,
@@ -39,40 +43,17 @@ def get_fred_cpi_yoy(series_id):
         response.raise_for_status()
         data = response.json()
         observations = data.get("observations", [])
-
-        # فلترة القيم الصالحة فقط (تجاهل ".")
         valid_obs = [obs for obs in observations if obs.get("value") not in (".", "")]
-        
-        if len(valid_obs) < 13:
-            return None  # مش كاف بيانات لحساب YoY
-        
-        # نأخذ آخر قيمة (آخر شهر)
-        latest = valid_obs[-1]
-        latest_date = latest["date"]
-        latest_value = float(latest["value"])
-
-        # نبحث عن قيمة نفس الشهر قبل سنة كاملة
-        target_year = int(latest_date[:4]) - 1
-        target_month = latest_date[5:7]
-
-        prev_year_value = None
-        for obs in valid_obs:
-            if obs["date"].startswith(f"{target_year}-{target_month}"):
-                prev_year_value = float(obs["value"])
-                break
-        
-        if prev_year_value is None:
-            return None
-        
-        # نحسب نسبة التغير YoY
-        yoy = ((latest_value - prev_year_value) / prev_year_value) * 100
-        return yoy
+        return float(valid_obs[-1]["value"]) if valid_obs else None
     except Exception as e:
-        st.error(f"Error fetching CPI YoY data: {e}")
+        st.error(f"Error fetching data for {series_id}: {e}")
         return None
 
 
 def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
+    """
+    Score the market based on macroeconomic indicators.
+    """
     score = 0
     if inflation is not None and inflation < 3: score += 1
     if unemployment is not None and unemployment < 4.5: score += 1
@@ -91,11 +72,14 @@ def score_market(inflation, unemployment, interest_rate, gdp, dollar_index):
     else:
         return "Strong Bearish"
 
+
 def fetch_forex_rates(pairs):
+    """
+    Fetch live Forex rates for the specified currency pairs.
+    """
     base = "USD"
     try:
-        # API call - Add apikey in URL if needed, or remove if not required
-        url = f"{FOREX_API_URL}?base={base}&apikey={FOREX_API_KEY}"
+        url = f"{FOREX_API_URL}?base={base}"
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
